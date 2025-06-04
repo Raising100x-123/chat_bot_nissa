@@ -35,7 +35,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_urlsafe(16))
 # Environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-turbo")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
 # MongoDB Atlas Search Index configuration
@@ -701,5 +701,5 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # use Render's assigned port
+    port = int(os.environ.get("PORT", 10000))  # use Render's assigned port
     app.run(host="0.0.0.0", port=port, debug=True)  
