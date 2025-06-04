@@ -1,0 +1,12 @@
+flask
+flask-cors
+python-dotenv
+langchain
+langchain-openai
+langchain-core
+langchain-community
+pymongo
+playwright
+openai
+tiktoken
+gunicorn

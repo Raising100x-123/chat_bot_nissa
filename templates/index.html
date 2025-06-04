@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website RAG Chatbot</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .chat-container {
+            height: calc(100vh - 280px);
+            overflow-y: auto;
+        }
+        .typing-indicator::after {
+            content: '...';
+            animation: typing 1.5s infinite;
+        }
+        @keyframes typing {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+            100% { content: '.'; }
+        }
+        .slide-down {
+            animation: slideDown 0.3s ease-out;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tab-button {
+            transition: all 0.3s ease;
+        }
+        .tab-button.active {
+            background-color: #3B82F6;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Website RAG Chatbot</h1>
+            
+            <!-- Loading Status -->
+            <div id="loading-status" class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="text-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p class="text-gray-600">Checking chatbot status...</p>
+                </div>
+            </div>
+            
+            <!-- Chatbot Status Display -->
+            <div id="status-display" class="bg-white rounded-lg shadow-md p-6 mb-6 hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold text-green-600">🤖 Chatbot Ready!</h2>
+                    <button onclick="toggleUrlInput()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        Manage Websites
+                    </button>
+                </div>
+                <div id="status-info" class="text-gray-600 mb-4"></div>
+                <div id="sources-list" class="text-sm text-gray-500"></div>
+            </div>
+            
+            <!-- Website URL Input Section (Hidden by default if chatbot exists) -->
+            <div id="url-input-section" class="bg-white rounded-lg shadow-md p-6 mb-6 hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Website Management</h2>
+                    <button onclick="toggleUrlInput()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                        Hide
+                    </button>
+                </div>
+                
+                <!-- Tab Navigation -->
+                <div class="flex border-b mb-4">
+                    <button onclick="switchTab('websites')" id="websites-tab" class="tab-button px-4 py-2 mr-2 rounded-t-lg active">
+                        Website URLs
+                    </button>
+                    <button onclick="switchTab('extra-text')" id="extra-text-tab" class="tab-button px-4 py-2 rounded-t-lg bg-gray-200">
+                        Extra Text
+                    </button>
+                </div>
+                
+                <!-- Websites Tab -->
+                <div id="websites-content" class="tab-content active">
+                    <div id="url-inputs">
+                        <div class="flex space-x-2 mb-2">
+                            <input type="text" id="url-1" placeholder="Enter website URL (e.g., https://example.com)" 
+                                   class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button onclick="addUrlInput()" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">
+                                Add URL
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Extra Text Tab -->
+                <div id="extra-text-content" class="tab-content">
+                    <div class="mb-4">
+                        <label for="extra-text-area" class="block text-sm font-medium text-gray-700 mb-2">
+                            Additional Information (Optional)
+                        </label>
+                        <textarea id="extra-text-area" rows="8" 
+                                  placeholder="Add any extra information that's not available on the websites. This could include internal knowledge, product details, FAQs, or any other relevant information you want the chatbot to know about..."
+                                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"></textarea>
+                        <p class="text-xs text-gray-500 mt-1">
+                            This text will be added to the chatbot's knowledge base along with website content.
+                        </p>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="flex space-x-2 mt-4">
+                    <button id="add-urls-btn" onclick="addToExistingBot()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 hidden">
+                        Add to Existing Chatbot
+                    </button>
+                    <button id="replace-bot-btn" onclick="replaceBot()" class="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 hidden">
+                        Replace Entire Chatbot
+                    </button>
+                    <button id="initialize-btn" onclick="initializeBot()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        Initialize Chatbot
+                    </button>
+                </div>
+                
+                <div id="init-status" class="text-center hidden mt-4"></div>
+            </div>
+            
+            <!-- Chat Section -->
+            <div id="chat-section" class="bg-white rounded-lg shadow-md hidden">
+                <div id="chat-container" class="chat-container p-6 border-b">
+                    <!-- Messages will be added here -->
+                </div>
+                <div class="p-4">
+                    <div class="flex space-x-2">
+                        <input id="message-input" type="text" placeholder="Type your message..." 
+                               class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               onkeydown="if(event.key === 'Enter') sendMessage()">
+                        <button onclick="sendMessage()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        let urlCounter = 1;
+        let isInitialized = false;
+        let chatbotStatus = null;
+        let currentTab = 'websites';
+        
+        // Generate a session ID and check status on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Generate session ID
+                const response = await fetch('/generate_session');
+                const data = await response.json();
+                sessionId = data.session_id;
+                console.log('Session ID:', sessionId);
+                
+                // Check chatbot status
+                await checkChatbotStatus();
+            } catch (error) {
+                console.error('Error during initialization:', error);
+                showError('Failed to initialize. Please refresh the page.');
+            }
+        });
+        
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+                btn.classList.add('bg-gray-200');
+            });
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Activate selected tab
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            document.getElementById(`${tabName}-tab`).classList.remove('bg-gray-200');
+            document.getElementById(`${tabName}-content`).classList.add('active');
+            
+            currentTab = tabName;
+        }
+        
+        async function checkChatbotStatus() {
+            try {
+                const response = await fetch('/check_status');
+                const data = await response.json();
+                chatbotStatus = data;
+                
+                // Hide loading
+                document.getElementById('loading-status').classList.add('hidden');
+                
+                if (data.initialized) {
+                    // Chatbot exists - show status and chat interface
+                    showExistingChatbot(data);
+                } else {
+                    // No chatbot - show URL input for first time setup
+                    showFirstTimeSetup(data);
+                }
+                
+            } catch (error) {
+                console.error('Error checking status:', error);
+                document.getElementById('loading-status').classList.add('hidden');
+                showError('Failed to check chatbot status. Please refresh the page.');
+            }
+        }
+        
+        function showExistingChatbot(data) {
+            isInitialized = true;
+            
+            // Show status display
+            const statusDisplay = document.getElementById('status-display');
+            const statusInfo = document.getElementById('status-info');
+            const sourcesList = document.getElementById('sources-list');
+            
+            statusInfo.textContent = data.message;
+            if (data.sources && data.sources.length > 0) {
+                sourcesList.innerHTML = `<strong>Websites:</strong> ${data.sources.join(', ')}`;
+                if (data.has_extra_text) {
+                    sourcesList.innerHTML += '<br><strong>Additional:</strong> Extra text content included';
+                }
+            }
+            
+            statusDisplay.classList.remove('hidden');
+            statusDisplay.classList.add('slide-down');
+            
+            // Show chat interface with welcome message
+            showChatInterface();
+            addWelcomeMessage(data);
+            
+            // Prepare URL input section for management (hidden initially)
+            const addBtn = document.getElementById('add-urls-btn');
+            const replaceBtn = document.getElementById('replace-bot-btn');
+            const initBtn = document.getElementById('initialize-btn');
+            
+            addBtn.classList.remove('hidden');
+            replaceBtn.classList.remove('hidden');
+            initBtn.classList.add('hidden');
+        }
+        
+        function showFirstTimeSetup(data) {
+            // Show URL input section for first-time setup
+            document.getElementById('url-input-section').classList.remove('hidden');
+            document.getElementById('url-input-section').classList.add('slide-down');
+        }
+        
+        function showChatInterface() {
+            document.getElementById('chat-section').classList.remove('hidden');
+            document.getElementById('chat-section').classList.add('slide-down');
+        }
+        
+        function addWelcomeMessage(data) {
+            const chatContainer = document.getElementById('chat-container');
+            const welcomeMessage = document.createElement('div');
+            welcomeMessage.className = 'flex items-start mb-4';
+            
+            const sourcesText = data.sources && data.sources.length > 0 
+                ? ` I have knowledge about: ${data.sources.slice(0, 3).join(', ')}${data.sources.length > 3 ? ' and more' : ''}.`
+                : '';
+            
+            const extraTextNote = data.has_extra_text ? ' I also have additional information that was provided separately.' : '';
+            
+            welcomeMessage.innerHTML = `
+                <div class="flex-shrink-0 h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                    🤖
+                </div>
+                <div class="ml-3 bg-blue-100 p-3 rounded-lg">
+                    <p><strong>Welcome back!</strong> I'm ready to help you with your questions.${sourcesText}${extraTextNote}</p>
+                    <p class="mt-2 text-sm text-gray-600">You can ask me anything about the websites I've analyzed, or use the "Manage Websites" button to add more sources or replace the entire chatbot.</p>
+                </div>
+            `;
+            chatContainer.appendChild(welcomeMessage);
+        }
+        
+        function toggleUrlInput() {
+            const urlSection = document.getElementById('url-input-section');
+            urlSection.classList.toggle('hidden');
+            if (!urlSection.classList.contains('hidden')) {
+                urlSection.classList.add('slide-down');
+            }
+        }
+        
+        function addUrlInput() {
+            urlCounter++;
+            const urlInputsDiv = document.getElementById('url-inputs');
+            const newInputDiv = document.createElement('div');
+            newInputDiv.className = 'flex space-x-2 mb-2';
+            newInputDiv.innerHTML = `
+                <input type="text" id="url-${urlCounter}" placeholder="Enter website URL (e.g., https://example.com)" 
+                       class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button onclick="removeUrlInput(this)" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                    Remove
+                </button>
+            `;
+            urlInputsDiv.appendChild(newInputDiv);
+        }
+        
+        function removeUrlInput(button) {
+            button.parentElement.remove();
+        }
+        
+        function collectUrls() {
+            const urls = [];
+            for (let i = 1; i <= urlCounter; i++) {
+                const urlInput = document.getElementById(`url-${i}`);
+                if (urlInput && urlInput.value.trim()) {
+                    urls.push(urlInput.value.trim());
+                }
+            }
+            return urls;
+        }
+        
+        function collectExtraText() {
+            const extraTextArea = document.getElementById('extra-text-area');
+            return extraTextArea ? extraTextArea.value.trim() : '';
+        }
+        
+        function showProgress(message, type = 'info') {
+            const initStatusDiv = document.getElementById('init-status');
+            const colorClass = type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : 'text-yellow-600';
+            initStatusDiv.className = `text-center ${colorClass} font-medium mt-2`;
+            initStatusDiv.innerHTML = message;
+            initStatusDiv.classList.remove('hidden');
+        }
+        
+        function showError(message) {
+            showProgress(message, 'error');
+        }
+        
+        async function addToExistingBot() {
+            const urls = collectUrls();
+            const extraText = collectExtraText();
+            
+            if (urls.length === 0 && !extraText) {
+                showError('Please enter at least one valid URL or add some extra text');
+                return;
+            }
+            
+            showProgress('Adding new content to existing chatbot... This may take a minute.');
+            
+            try {
+                const response = await fetch('/add_urls', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        urls: urls,
+                        extra_text: extraText 
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showProgress(data.message, 'success');
+                    // Refresh status
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    showError(`Error: ${data.error || 'Failed to add content'}`);
+                }
+            } catch (error) {
+                console.error('Error adding content:', error);
+                showError('Failed to add content. Check console for details.');
+            }
+        }
+        
+        async function replaceBot() {
+            const urls = collectUrls();
+            const extraText = collectExtraText();
+            
+            if (urls.length === 0 && !extraText) {
+                showError('Please enter at least one valid URL or add some extra text');
+                return;
+            }
+            
+            if (!confirm('This will completely replace your existing chatbot with new data. All previous data will be lost. Continue?')) {
+                return;
+            }
+            
+            showProgress('Replacing entire chatbot with new data... This may take a minute.');
+            
+            try {
+                const response = await fetch('/initialize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        urls: urls,
+                        extra_text: extraText 
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showProgress('Chatbot replaced successfully!', 'success');
+                    // Reload page to show new status
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    showError(`Error: ${data.error || 'Failed to replace chatbot'}`);
+                }
+            } catch (error) {
+                console.error('Error replacing chatbot:', error);
+                showError('Failed to replace chatbot. Check console for details.');
+            }
+        }
+        
+        async function initializeBot() {
+            const urls = collectUrls();
+            const extraText = collectExtraText();
+            
+            if (urls.length === 0 && !extraText) {
+                showError('Please enter at least one valid URL or add some extra text');
+                return;
+            }
+            
+            showProgress('Initializing chatbot with website data and extra text... This may take a minute.');
+            
+            try {
+                const response = await fetch('/initialize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        urls: urls,
+                        extra_text: extraText 
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showProgress('Chatbot initialized successfully!', 'success');
+                    // Reload page to show new status
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    showError(`Error: ${data.error || 'Failed to initialize chatbot'}`);
+                }
+            } catch (error) {
+                console.error('Error initializing chatbot:', error);
+                showError('Failed to initialize chatbot. Check console for details.');
+            }
+        }
+        
+        async function sendMessage() {
+            if (!isInitialized) {
+                alert('Please initialize the chatbot with a website URL first.');
+                return;
+            }
+            
+            const messageInput = document.getElementById('message-input');
+            const userMessage = messageInput.value.trim();
+            
+            if (!userMessage) return;
+            
+            const chatContainer = document.getElementById('chat-container');
+            
+            // Add user message
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.className = 'flex items-start justify-end mb-4';
+            userMessageDiv.innerHTML = `
+                <div class="mr-3 bg-blue-600 text-white p-3 rounded-lg max-w-xs lg:max-w-md">
+                    <p>${userMessage}</p>
+                </div>
+                <div class="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center font-bold">
+                    👤
+                </div>
+            `;
+            chatContainer.appendChild(userMessageDiv);
+            
+            // Add typing indicator
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'flex items-start mb-4';
+            typingIndicator.innerHTML = `
+                <div class="flex-shrink-0 h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                    🤖
+                </div>
+                <div class="ml-3 bg-blue-100 p-3 rounded-lg typing-indicator">
+                    <p>Thinking</p>
+                </div>
+            `;
+            chatContainer.appendChild(typingIndicator);
+            
+            // Clear input and scroll
+            messageInput.value = '';
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: userMessage,
+                        session_id: sessionId
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                // Remove typing indicator
+                chatContainer.removeChild(typingIndicator);
+                
+                // Add bot response
+                const botMessageDiv = document.createElement('div');
+                botMessageDiv.className = 'flex items-start mb-4';
+                const responseText = data.response || data.error || 'Sorry, I encountered an error.';
+                
+                botMessageDiv.innerHTML = `
+                    <div class="flex-shrink-0 h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                        🤖
+                    </div>
+                    <div class="ml-3 bg-blue-100 p-3 rounded-lg max-w-xs lg:max-w-md">
+                        <p>${responseText.replace(/\n/g, '<br>')}</p>
+                    </div>
+                `;
+                chatContainer.appendChild(botMessageDiv);
+                
+                // Scroll to bottom
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            } catch (error) {
+                console.error('Error sending message:', error);
+                
+                // Remove typing indicator
+                chatContainer.removeChild(typingIndicator);
+                
+                // Add error message
+                const errorMessageDiv = document.createElement('div');
+                errorMessageDiv.className = 'flex items-start mb-4';
+                errorMessageDiv.innerHTML = `
+                    <div class="flex-shrink-0 h-10 w-10 rounded-full bg-red-500 flex items-center justify-center text-white font-bold">
+                        ⚠️
+                    </div>
+                    <div class="ml-3 bg-red-100 p-3 rounded-lg max-w-xs lg:max-w-md">
+                        <p>Sorry, there was an error processing your request. Please try again.</p>
+                    </div>
+                `;
+                chatContainer.appendChild(errorMessageDiv);
+                
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>
