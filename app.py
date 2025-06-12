@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, session
 import os
 from dotenv import load_dotenv
+from langchain_groq import ChatGroq  # Add import for Groq
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -23,6 +24,7 @@ from flask_cors import CORS
 from langchain_core.documents import Document
 import urllib.parse
 from playwright.sync_api import sync_playwright
+import re
 
 # Load environment variables
 load_dotenv()
@@ -35,8 +37,10 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_urlsafe(16))
 # Environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-turbo")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Add Groq API key
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-1106-preview")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")  # Add Groq model
 
 # MongoDB Atlas Search Index configuration
 ATLAS_PUBLIC_KEY = os.getenv("ATLAS_PUBLIC_KEY")
@@ -50,13 +54,19 @@ INDEX_NAME = "vector_index"
 client = MongoClient(MONGODB_URI)
 db = client.Chatbot
 chat_collection = db.chat_history
+lead_collection = db.leads  # Collection for leads
 collection_name = "website_data"
 
 # Set OpenAI API Key
 os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
+# Set Groq API Key
+os.environ['GROQ_API_KEY'] = GROQ_API_KEY
 
 # Initialize LLM
 llm = ChatOpenAI(model=LLM_MODEL, temperature=LLM_TEMPERATURE)
+groq_llm = ChatGroq(model=GROQ_MODEL, temperature=0.5)  # Initialize Groq LLM with lower temperature for more precise extraction
+
+
 
 # Prompt templates
 CONTEXT_SYSTEM_PROMPT = """Given a chat history and the latest user question 
@@ -64,62 +74,132 @@ which might reference context in the chat history, formulate a standalone questi
 which can be understood without the chat history. Do NOT answer the question, 
 just reformulate it if needed and otherwise return it as is."""
 
-QA_SYSTEM_PROMPT = """
-Your name is Nisaa - the smart bot of   - These are your Operating Instructions
-
+QA_SYSTEM_PROMPT = """Your name is Nisaa – the smart bot of   – These are your Operating Instructions
+ 
 I. Welcome Message:
 When a user starts the conversation or says 'hi', greet them with:
-"Hi, this is Nisaa! 😊 How can I assist you today?"
-
-I. Purpose:
-Your primary purpose is to assist website visitors and answer their questions about this website and our services.
-
-II. Output Style Instructions:
-1.  Every answer must be no more than 2–3 lines.
-2. Be direct and to the point; avoid unnecessary details or filler.
-3. When listing products, services, or important information, always display each item on a separate line, using a numbered or bulleted list. Never list items inline or in a single sentence.
-   Example:
-   1. Breeth
-   2. Beamti
-   3. Smellika
-   4. Leadesh
-4. Do not write long paragraphs or explanations unless specifically asked for details.
-5. Do not use the phrase "What else can I help you with today?" except in the welcome message. For other responses, end with a short, friendly, and relevant phrase such as:
-   - "Let me know if you want details on any of them."
-   - "Feel free to ask about any feature."
-   - "I'm here if you have more questions."
-   Choose the closing that best fits the context of the user's question.
-6. Strict Rule: Do not include any website links, URLs, or references to external pages in your responses. Only provide information directly from the context, without suggesting users visit another page.
-
-III. Tone of Voice & Demeanor:
-1. Professional but Conversational
-Use clear, concise language that reflects your expertise—but avoid sounding overly formal or robotic. Speak like a real person having a professional conversation. Balance authority with friendliness.
-
-2. Enthusiastic & Passionate
-Show genuine excitement for what your company does and the value you provide. Make it clear that you care about helping your clients succeed and take pride in your solutions.
-
-3. Empathetic & Understanding
-Recognize that every customer or business has unique needs. Acknowledge their challenges and approach each interaction with curiosity and care. Avoid one-size-fits-all answers.
-
-4. Helpful & Resourceful
-Be genuinely helpful. Offer relevant suggestions, answer questions clearly, and guide people to useful resources, tools, or services your company provides. Aim to solve problems, not just sell.
-
-5. Subtly Persuasive
-Encourage next steps (like a demo, sign-up, or call) by focusing on the benefits and real-world outcomes. Be persuasive through value, not pressure.
-
-6. Polite & Respectful (Never Rude or Argumentative)
-Always maintain a respectful tone, even if someone is frustrated or if you don't have an immediate answer.
-
-You are a knowledgeable assistant for a website. Answer questions based on the provided context.
-If the information isn't available in the context, politely say you don't have enough information and offer to help with something else.
-Keep your responses concise but informative. Be friendly and professional in your tone.
-
-Context: {context}
-Chat History: {chat_history}
-Question: {input}
-
+"Hi, this is Nisaa! 😊 It’s lovely to meet you here. How can I assist you today?"
+ 
+After answering their first question or building rapport (around the 3rd or 4th message), ask:
+"By the way, may I know your name? I’d love to make our chat a bit more personal."
+ 
+II. Purpose:
+Your role is to assist website visitors by answering questions about this website and its services in a helpful, warm, and respectful manner. Your goal is to make users feel heard, understood, and supported.
+ 
+III. Hook Points Strategy:
+Use subtle follow-up prompts to keep the conversation flowing naturally and show interest in helping.
+ 
+Use just one hook when appropriate:
+- “Would you like a quick breakdown of options?”
+- “Should I walk you through how it works?”
+- “Want to hear what others usually go for?”
+- “Would you like help choosing the right one?”
+- “Need help figuring out which fits best?”
+ 
+IV. Lead Generation Instructions:
+You must collect these 4 key details over time:
+- Name
+- Email
+- Contact Number
+- Area of Interest
+ 
+**Lead Flow Timing:**
+ 
+1. Start by helping. Do not ask for any info right away.
+ 
+2. Around line 3–4 (after value is shared), ask:
+   - “By the way, may I know your name? It’s always nicer to chat personally 🙂”
+ 
+3. Continue answering and offering help with kindness and curiosity.
+ 
+4. Around line 7–8 (when the main question is answered), ask gently:
+   - “Would you like me to send these details to your email?”
+   - “Also, just in case our team needs to reach you, may I have your contact number?”
+ 
+5. If they hesitate, say:
+   - “Totally up to you — I just want to make sure you get the best possible support.”
+ 
+6. Confirm everything with warmth:
+   - “Thank you so much, [Name]! It’s been lovely assisting you. Our team will reach out if needed. And you can always come back if you need anything!”
+ 
+V. Output Style Instructions:
+1. Each message should be under 3 lines.
+2. Use bullets or numbered lists when describing services or options.
+3. Be conversational and thoughtful — don’t sound robotic.
+4. Don’t overuse closers like “How else can I help?” — instead use:
+   - “Let me know if you'd like to go deeper on any of that.”
+   - “I’m right here if you have more questions.”
+5. Never share links or external pages.
+ 
+VI. Tone of Voice & Demeanor:
+1. Warm and friendly — as if you're a helpful friend
+2. Emotionally intelligent and conversational
+3. Respectful, empathetic, and supportive
+4. Calm and caring, not pushy
+5. Encouraging, not salesy
+ 
+VII. Human-style Sample Flow:
+ 
+User: "Hi"
+Nisaa: "Hi, this is Nisaa! 😊 It’s lovely to meet you here. How can I assist you today?"
+ 
+User: "Can you tell me about your services?"
+Nisaa: "Absolutely! We offer:  
+1. Generative AI tools for content creation  
+2. Computer Vision for automation  
+3. Full-stack development with AI integration  
+Would you like help picking the right one?"
+ 
+User: "Generative AI"
+Nisaa: "Great choice! It’s perfect for drafting ideas, visuals, and summaries. Want a quick example?"
+ 
+User: "Yes"
+Nisaa: "For instance, we help healthcare teams auto-generate reports and patient summaries.  
+By the way, may I know your name? I’d love to personalize this a bit 🙂"
+ 
+User: "I'm Rahul"
+Nisaa: "Nice to meet you, Rahul! 😊 Let me know if you'd like to explore how Gen AI could fit into your goals."
+ 
+User: "Thanks, that helped."
+Nisaa: "I’m so glad to hear that, Rahul! Would you like me to email you this info so it’s easy to find later?"
+ 
+User: "Sure"
+Nisaa: "Great! May I also have your contact number in case our team wants to follow up with ideas for you?"
+ 
+User: "9876543210, rahul@email.com"
+Nisaa: "Thanks, Rahul! It’s been lovely assisting you. Our team will be in touch soon — and you’re always welcome to come back if you need anything else 💬"
+ 
+VIII. Golden Rules:
+- Ask for name early but not immediately.
+- Ask for email/phone after helping, never before.
+- Keep tone friendly, patient, and human.
+- Never force or rush — always respect the user’s pace.
+ 
+Context: {context}  
+Chat History: {chat_history}  
+Question: {input}  
+ 
 Answer:
 """
+
+LEAD_EXTRACTION_PROMPT = """
+
+ Extract the following information from the conversation if available:
+        - name
+        - email_id
+        - contact_number
+        - location
+        - service_interest
+        - Appointment_date
+        - Appointment_Time
+        Return ONLY a valid JSON object with these fields with NO additional text before or after.
+        If information isn't found, leave the field empty.
+        
+        Do not include any explanatory text, notes, or code blocks. Return ONLY the raw JSON.
+        
+        Conversation: {conversation}
+"""
+
 
 # Create prompt templates
 contextualize_q_prompt = ChatPromptTemplate.from_messages([
@@ -432,7 +512,7 @@ def initialize_vector_store(urls, extra_text="", replace_existing=True):
     try:
         vector_search = MongoDBAtlasVectorSearch.from_documents(
             documents=final_documents,
-            embedding=OpenAIEmbeddings(disallowed_special=()),
+            embedding=OpenAIEmbeddings("text-embedding-3-small",disallowed_special=()),
             collection=db[collection_name],
             index_name=INDEX_NAME,
         )
@@ -452,6 +532,82 @@ def initialize_vector_store(urls, extra_text="", replace_existing=True):
     except Exception as e:
         print(f"Error creating vector store: {e}")
         raise Exception(f"Failed to create vector store: {str(e)}")
+    
+# Extract lead information using Groq API
+def extract_lead_info(session_id):
+    # Get chat history
+    chat_doc = chat_collection.find_one({"session_id": session_id})
+    if not chat_doc or "messages" not in chat_doc:
+        return
+    
+    # Convert conversation to plain text
+    conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_doc["messages"]])
+    
+    try:
+
+
+        # Use the Groq LLM to extract lead info
+        response = groq_llm.invoke(LEAD_EXTRACTION_PROMPT.format(conversation=conversation))
+        response_text = response.content.strip()
+        # Extract JSON from potential markdown code blocks
+        if "```json" in response_text or "```" in response_text:
+            # Extract content between code blocks if present
+            import re
+            json_match = re.search(r"```(?:json)?\n(.*?)\n```", response_text, re.DOTALL)
+            if json_match:
+                response_text = json_match.group(1).strip()
+
+        try:
+            lead_data = json.loads(response.content)
+            print(f"Successfully parsed lead data: {lead_data}")
+        except json.JSONDecodeError:
+            print(f"Failed to parse JSON from Groq response: {response_text }")
+            print(f"JSON error: {str(e)}")
+
+            # Alternative approach: Use regex to find JSON-like structure
+            import re
+            json_pattern = r'\{[^}]*"name"[^}]*"email_id"[^}]*"contact_number"[^}]*"location"[^}]*"service_interest"[^}]*\}'
+            json_match = re.search(json_pattern, response_text, re.DOTALL)
+            
+            if json_match:
+                try:
+                    lead_data = json.loads(json_match.group(0))
+                    print(f"Extracted JSON using regex: {lead_data}")
+                except json.JSONDecodeError:
+                    # Fallback if all parsing fails
+                    lead_data = {
+                        "name": "",
+                        "email_id": "",
+                        "contact_number": "",
+                        "location": "",
+                        "service_interest": "",
+                        "parsing_error": "Failed to parse response"
+                    }
+            else:
+                # Final fallback
+                lead_data = {
+                    "name": "",
+                    "email_id": "",
+                    "contact_number": "",
+                    "location": "",
+                    "service_interest": "",
+                    "raw_response": response_text[:500]  # Store part of the raw response for debugging
+                }        
+        # Add session_id & timestamp
+        lead_data["session_id"] = session_id
+        lead_data["updated_at"] = datetime.utcnow()
+        
+        # Add LLM metadata for tracking
+        lead_data["extraction_model"] = "groq_" + GROQ_MODEL
+        
+        # Save to MongoDB
+        lead_collection.update_one(
+            {"session_id": session_id},
+            {"$set": lead_data},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[Lead Extraction Error] {e}")
 
 # Routes
 @app.route('/')
@@ -695,10 +851,20 @@ def chat():
             },
             upsert=True
         )
+
+        # Extract lead info after sufficient conversation
+        message_count = len(chat_collection.find_one({"session_id": session_id}).get("messages", []))
+        if message_count >= 4:  # Extract after 2 user messages
+            extract_lead_info(session_id)
         
         return jsonify({'response': answer}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/leads', methods=['GET'])
+def get_leads():
+    # Simple admin route to get all leads (should be protected in production)
+    leads = list(lead_collection.find({}, {"_id": 0}))
+    return jsonify(leads)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))  # use Render's assigned port

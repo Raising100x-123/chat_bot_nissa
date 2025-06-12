@@ -10,3 +10,4 @@ playwright
 openai
 tiktoken
 gunicorn
+langchain_groq
